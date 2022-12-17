@@ -47,7 +47,7 @@ _base_ = './yolov5_s-v61_syncbn_8xb16-300e_coco.py'
 model = dict(
     neck = dict(
         type = 'YOLOv6RepPAFPN',
-        in_channels = [256, 512, 1024], 
+        in_channels = [256, 512, 1024],
         out_channels = [128, 256, 512], # 注意YOLOv6RepPAFPN的输出通道是[128, 256, 512]
         num_csp_blocks = 12,
         act_cfg = dict(type='ReLU', inplace = True),
@@ -86,4 +86,57 @@ model = dict(
 
 ## 3. YOLOv5 Head 替换
 
-(1) 假设想将 `yolov5 backbone + yolov5 neck + yolox head` 作为 `YOLOv5` 的完整网络，则配置文件如下：
+(1) 假设想将 `yolov5 backbone + yolov5 neck + yolo7 head` 作为 `YOLOv5` 的完整网络，则配置文件如下：
+
+```python
+_base_ = './yolov5_s-v61_syncbn_8xb16-300e_coco.py'
+
+# different from yolov5
+anchors = [
+    [(12, 16), (19, 36), (40, 28)],  # P3/8
+    [(36, 75), (76, 55), (72, 146)],  # P4/16
+    [(142, 110), (192, 243), (459, 401)]  # P5/32
+]
+strides = [8, 16, 32]
+num_det_layers = 3
+num_classes = 1 # 根据自己的数据集调整
+img_scale = (640, 640)
+
+model = dict(
+    bbox_head=dict(
+        type='YOLOv7Head',
+        head_module=dict(
+            type='YOLOv7HeadModule',
+            num_classes=num_classes,
+            in_channels=[256, 512, 1024],
+            featmap_strides=strides,
+            num_base_priors=3),
+        prior_generator=dict(
+            type='mmdet.YOLOAnchorGenerator',
+            base_sizes=anchors,
+            strides=strides),
+        # scaled based on number of detection layers
+        loss_cls=dict(
+            type='mmdet.CrossEntropyLoss',
+            use_sigmoid=True,
+            reduction='mean',
+            loss_weight=0.3 * (num_classes / 80 * 3 / num_det_layers)),
+        loss_bbox=dict(
+            type='IoULoss',
+            iou_mode='ciou',
+            bbox_format='xywh',
+            reduction='mean',
+            loss_weight=0.05 * (3 / num_det_layers),
+            return_iou=True),
+        loss_obj=dict(
+            type='mmdet.CrossEntropyLoss',
+            use_sigmoid=True,
+            reduction='mean',
+            loss_weight=0.7 * ((img_scale[0] / 640)**2 * 3 / num_det_layers)),
+        obj_level_weights=[4., 1., 0.4],
+        # BatchYOLOv7Assigner params
+        prior_match_thr=4.,
+        simota_candidate_topk=10,
+        simota_iou_weight=3.0,
+        simota_cls_weight=1.0))
+```
